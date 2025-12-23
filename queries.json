@@ -1,17 +1,20 @@
-{
-  "leaderboard": {
+[
+  {
+    "name": "leaderboard",
     "title": "Security Assessment Leaderboard",
-    "description": "Security vulnerability testing for home automation agents",
+    "description": "Security vulnerability testing rankings for home automation agents",
     "query": "SELECT agent_id, MAX(scores.overall_score) as best_score, AVG(scores.detection_accuracy) as avg_accuracy, MIN(scores.false_positive_rate) as best_fpr, COUNT(*) as submission_count, MAX(timestamp) as last_submission FROM read_json_auto('results/*.json') GROUP BY agent_id ORDER BY best_score DESC, avg_accuracy DESC"
   },
-  "recent_submissions": {
+  {
+    "name": "recent_submissions",
     "title": "Recent Submissions",
-    "description": "Latest assessment results",
-    "query": "SELECT agent_id, scores.overall_score, scores.detection_accuracy, timestamp FROM read_json_auto('results/*.json') ORDER BY timestamp DESC LIMIT 10"
+    "description": "Latest assessment results from all agents",
+    "query": "SELECT agent_id, scores.overall_score, scores.detection_accuracy, scores.false_positive_rate, timestamp FROM read_json_auto('results/*.json') ORDER BY timestamp DESC LIMIT 10"
   },
-  "performance_trends": {
+  {
+    "name": "performance_trends",
     "title": "Performance Over Time",
-    "description": "Agent performance trends",
-    "query": "SELECT agent_id, DATE_TRUNC('day', CAST(timestamp AS TIMESTAMP)) as date, AVG(scores.overall_score) as avg_daily_score FROM read_json_auto('results/*.json') GROUP BY agent_id, date ORDER BY date DESC"
+    "description": "Daily performance trends for each agent",
+    "query": "SELECT agent_id, DATE_TRUNC('day', CAST(timestamp AS TIMESTAMP)) as date, AVG(scores.overall_score) as avg_daily_score, COUNT(*) as daily_submissions FROM read_json_auto('results/*.json') GROUP BY agent_id, date ORDER BY date DESC, avg_daily_score DESC"
   }
-}
+]
