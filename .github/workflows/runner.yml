@@ -1,0 +1,120 @@
+name: AgentBeats Assessment Runner
+
+on:
+  pull_request:
+    paths:
+      - 'submissions/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'submissions/**'
+  workflow_dispatch:
+
+jobs:
+  process-results:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install DuckDB
+        run: |
+          pip install duckdb pandas
+
+      - name: Process Submissions
+        run: |
+          echo "Processing new submissions..."
+          # Copy new submissions from submissions/ to results/
+          if [ -d "submissions" ] && [ "$(ls -A submissions)" ]; then
+            cp submissions/*.json results/ 2>/dev/null || true
+            echo "Submissions processed and moved to results/"
+          else
+            echo "No submissions to process"
+          fi
+
+      - name: Generate Leaderboard
+        run: |
+          echo "Generating leaderboard from results..."
+          python -c "
+          import duckdb
+          import json
+          import os
+          from datetime import datetime
+
+          # Connect to DuckDB
+          con = duckdb.connect(':memory:')
+
+          # Read all JSON results
+          if os.path.exists('results') and os.listdir('results'):
+              query = '''
+                  SELECT
+                      agent_id,
+                      MAX(scores.overall_score) as best_score,
+                      AVG(scores.detection_accuracy) as avg_accuracy,
+                      MIN(scores.false_positive_rate) as best_fpr,
+                      COUNT(*) as submission_count,
+                      MAX(timestamp) as last_submission
+                  FROM read_json_auto('results/*.json')
+                  GROUP BY agent_id
+                  ORDER BY best_score DESC, avg_accuracy DESC
+              '''
+
+              try:
+                  results = con.execute(query).fetchdf()
+
+                  # Save leaderboard
+                  leaderboard = {
+                      'generated_at': datetime.utcnow().isoformat(),
+                      'leaderboard': results.to_dict('records')
+                  }
+
+                  with open('leaderboard.json', 'w') as f:
+                      json.dump(leaderboard, f, indent=2)
+
+                  print('Leaderboard generated successfully')
+                  print(results.to_string())
+              except Exception as e:
+                  print(f'Error generating leaderboard: {e}')
+          else:
+              print('No results found to generate leaderboard')
+          "
+
+      - name: Commit Results
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: |
+          git config user.name "AgentBeats Bot"
+          git config user.email "bot@agentbeats.dev"
+          git add results/ leaderboard.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "Update assessment results and leaderboard"
+          git push || true
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (fs.existsSync('leaderboard.json')) {
+              const leaderboard = JSON.parse(fs.readFileSync('leaderboard.json', 'utf8'));
+              const table = leaderboard.leaderboard.map((row, idx) =>
+                `| ${idx + 1} | ${row.agent_id} | ${row.best_score.toFixed(2)} | ${(row.avg_accuracy * 100).toFixed(1)}% | ${row.submission_count} |`
+              ).join('\n');
+
+              const comment = `## 🏆 Leaderboard Updated\n\n| Rank | Agent ID | Best Score | Avg Accuracy | Submissions |\n|------|----------|------------|--------------|-------------|\n${table}\n\n_Last updated: ${leaderboard.generated_at}_`;
+
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
